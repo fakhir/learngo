@@ -31,6 +31,8 @@ func variableDeclarations() {
 	// byte (alias for uint8), rune (alias for int32)
 	// int, int8, int16, int32, int64
 	// uint, uint8, uint16, uint32, uint64, uintptr
+	//
+	// Other common slice types: []byte, []rune, []int
 
 	var (
 		isInit       bool   = true
@@ -48,12 +50,34 @@ func variableDeclarations() {
 
 	fmt.Printf("Variables: %T %v, %T %v, %T %v, %T %v\n", num, num, numf, numf, numu, numu, pi, pi)
 
+	str := "this is a test string"
+	str = `this is a raw string without escape interpretation "\n"`
+	// String to bytes
+	byteStr := []byte(str)
+	runeStr := []rune(str)
+	fmt.Println("Variables:str", str)
+	fmt.Println("Variables:byte_str", byteStr)
+	fmt.Println("Variables:rune_str", runeStr)
+
+	// Bytes to string after reversing the string
+	for i, j := 0, len(byteStr)-1; i < j; i, j = i+1, j-1 {
+		byteStr[i], byteStr[j] = byteStr[j], byteStr[i]
+	}
+	str = string(byteStr)
+	fmt.Println("Variables:reversed", str)
 	return
 }
 
 func functionsInGo() {
 	// Functions cannot be nested but they can be assigned to variables.
 	// Functions can be used before they are defined, within the same file.
+
+	// Following are some cases in which functions can be nested and they can form
+	// closures as well:
+	// - A function is defined and assigned to a local variable within a parent function.
+	// - The "go" keyword is used to execute a goroutine which is defined in-place within
+	//   the parent function.
+	// - The return statement is used to return a function to the caller, defined in place.
 
 	// Function with multiple return values (unnamed)
 	var swap = func(x, y string) (string, string) {
@@ -217,7 +241,7 @@ func pointersInGo() {
 	var ptrToJ *int = &j
 	*ptrToJ = *ptrToJ / 17
 
-	fmt.Println("Pointers:", i, j)
+	fmt.Println("Pointers:", i, j, ptrToI, ptrToJ, *ptrToI, *ptrToJ)
 
 	// Pointer aritematic is not allowed in Go
 }
@@ -386,6 +410,98 @@ func mapDataType() {
 	fmt.Println("Map:incFunc", incFunc[1]())
 }
 
+func makeAndNew() {
+	// Remember that new(Type) returns a pointer to the zeroed value of Type.
+	// And make(Type, len, cap) is used to allocate slices, maps and channels ONLY,
+	// and returns an initialized (not zero'ed) Type itself instead of a pointer to it.
+
+	var n *[]int = new([]int) // A nil slice is of not much use
+	var m []int = make([]int, 10, 50)
+	m[0] = 1
+	m[1] = 2
+	m[2] = 3
+
+	*n = make([]int, 10) // We're making it unneccessarily complex. Idomatic: x := make([]int, 10)
+	(*n)[0] = 10         // The brackets around (*n) are required.
+
+	fmt.Println("Allocation:", n, m)
+}
+
+func constructorsInGo() {
+	type StudentInfo struct {
+		name string
+		age  int
+	}
+
+	NewStudentInfo := func(name string, age int) *StudentInfo {
+		if name == "" {
+			return nil
+		}
+		// Below statement is equivalent to this:
+		// var student *StudentInfo = new(StudentInfo)
+		// student.name = name
+		// student.age = age
+		// return student
+		return &StudentInfo{name: name, age: age}
+
+		// Note in the above statement that it is valid in Go to return the address of
+		// a local variable and this method of using composite literals is preferred
+		// instead of using new().
+	}
+
+	var student *StudentInfo = NewStudentInfo("Fred", 10)
+	fmt.Println("Constructors:", student)
+}
+
+func concurrencyAndChannels() {
+	// A channel has a specific type or can be the empty interface for generic type.
+	// Use make(chan int, 10) to create a channel which can buffer 10 items.
+	// The default is 0, which means the sender blocks until the receiver receives.
+	var numberChan chan int = make(chan int)
+
+	waitAndPrint := func(str string, seconds int) {
+		time.Sleep(time.Duration(seconds) * time.Second)
+		fmt.Println("Concurrent:", str, "is ready", seconds)
+		// Write to the channel
+		numberChan <- len(str)
+	}
+
+	go waitAndPrint("Tea", 2)
+	go waitAndPrint("Coffee", 1)
+
+	fmt.Println("Concurrent: Waiting for tea/coffee")
+	var bytesWritten int
+	bytesWritten = <-numberChan
+	bytesWritten += <-numberChan
+	fmt.Println("Concurrent: Bytes sent", bytesWritten)
+}
+
+func moreOnChannels() {
+	// - Channels have a specific type which can even be struct or the generic interface.
+	// - When passing a channel to a function as a parameter, use these types:
+	//   - func abc(<-chan int): For the read side of the channel.
+	//   - func abc(chan<- int): For the write side of the channel.
+	// - A reader can use select to monitor multiple channels.
+
+	// Design patterns:
+	//
+	// - Infinite writer goroutine: A goroutine may write infinitely to a channel. The
+	//   reader can read until it prefers and when the program terminates, it would
+	//   cleanly exit despite the infinite goroutine.
+	//
+	// - Infinite writer goroutine with termination: Pass the goroutine another bool
+	//   channel on which the caller will send a quit signal when he wants to terminate
+	//   the infinite goroutine. The goroutine uses select to monitor the quit channel.
+	//
+	// - Finite writer goroutine: The goroutine writes data to the channel and then uses
+	//   close(outchan) to close the channel. The reader can use either "range inchan" to
+	//   read all values, or can use "value, ok := <-inchan" where "ok" would be false
+	//   when the channel closes.
+	//
+	// - Async functions usually first create a channel which they return to the caller
+	//   and then they run a goroutine which operates on the channel.
+}
+
 func main() {
 	fmt.Println("Hello world", rand.Intn(100))
 
@@ -399,4 +515,8 @@ func main() {
 	arrayDataType()
 	moreOnSlices()
 	mapDataType()
+	makeAndNew()
+	constructorsInGo()
+	concurrencyAndChannels()
+	moreOnChannels()
 }
