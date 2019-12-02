@@ -2,16 +2,23 @@ package main
 
 // Similar parenthesis based grouping is also allowed for "var" and "const" statements
 import (
+	"bufio"
 	"fmt"
+	"io"
+	"io/ioutil"
+	"log"
 	"math"
 	"math/rand"
+	"net/http"
+	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 	"time"
 )
 
 // - Semicolons are optional at end of statements
-// - Any identified begining with a capital letter gets automatically exported
+// - Any identifier begining with a capital letter gets exported automatically
 
 func swap(a, b string) (string, string) {
 	return b, a
@@ -157,16 +164,16 @@ J:
 	}
 
 	// Switch also has an optional initialization, no break needed, cases must be const
-	// Case values can be function calls.
+	// Case values can be function calls. And default can come first.
 	switch os := runtime.GOOS; os {
-	case "darwin":
-		fmt.Println("Ctrlflow:OS X")
-	case "linux":
-		fmt.Println("Ctrlflow:OS Linux")
 	case "some other OS", "yes another OS": // Multiple cases can be separated by a comma
 		fallthrough // Use fallthrough explicitly to fall through to next case
 	default:
 		fmt.Println("Ctrlflow:", os)
+	case "darwin":
+		fmt.Println("Ctrlflow:OS X")
+	case "linux":
+		fmt.Println("Ctrlflow:OS Linux")
 	}
 
 	// The switch condition can be skipped to write long if/else chains
@@ -178,6 +185,27 @@ J:
 		fmt.Println("Ctrlflow:Good afternoon")
 	default:
 		fmt.Println("Ctrlflow:Good evening")
+	}
+
+	// Another example if switch similar to if
+	shouldEscape := false
+	ch := 'a'
+	switch ch {
+	case '?', ' ', '&', '=', '+', '%':
+		shouldEscape = true
+	}
+	fmt.Println("Ctrlflow:shouldEscape", shouldEscape)
+
+	// A Type Switch statement can be used to check the type
+	var g interface{}
+	g = "sample text"
+	switch g.(type) {
+	case int:
+		fmt.Println("Ctrlflow:is int")
+	case *int:
+		fmt.Println("Ctrlflow:is *int")
+	case string:
+		fmt.Println("Ctrlflow:is string")
 	}
 }
 
@@ -396,6 +424,11 @@ func mapDataType() {
 	delete(monthnames, "Jan")
 
 	// Checking for existence
+	// Also note that "ok" can be defined multiple times in a multi-variable
+	// assignment provided that at least one variable is newly defined and
+	// that the type of the previous "ok" definition identical with the earlier
+	// one. If this is done in an inner scope then the outer "ok" would be
+	// shadowed by a newly created inner scoped "ok".
 	value, ok := monthnames["Jan"]
 	fmt.Printf("Map:Jan exists: value:%v ok:%v\n", value, ok)
 	value, ok = monthnames["January"]
@@ -500,10 +533,153 @@ func moreOnChannels() {
 	//
 	// - Async functions usually first create a channel which they return to the caller
 	//   and then they run a goroutine which operates on the channel.
+
+	// dup3 duplicates the given channel into three separate channels.
+	dup3 := func(in <-chan int) (<-chan int, <-chan int, <-chan int) {
+		a, b, c := make(chan int, 2), make(chan int, 2), make(chan int, 2)
+		// goroutine to duplicate data on incoming channel to the three new channels.
+		go func() {
+			for {
+				x, ok := <-in
+				if !ok {
+					close(a)
+					close(b)
+					close(c)
+					break
+				}
+				a <- x
+				b <- x
+				c <- x
+			}
+		}()
+		return a, b, c
+	}
+
+	fib := func(count int) <-chan int {
+		x := make(chan int, 2)
+		a, b, out := dup3(x)
+		go func() {
+			x <- 0
+			x <- 1
+			<-b
+			for ; count > 1; count = count - 1 {
+				x <- <-a + <-b
+			}
+			close(x)
+		}()
+		return out
+	}
+
+	fmt.Print("Channels:")
+	for num := range fib(7) {
+		fmt.Print(num, " ")
+	}
+	fmt.Println()
+}
+
+func communicationInGo() {
+	cat := func(filename string) int {
+		f, err := os.Open(filename)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer f.Close()
+
+		buf := make([]byte, 256)
+		count := 0
+		for {
+			n, err := f.Read(buf)
+			if n != 0 {
+				//os.Stdout.Write(buf[:n])
+				fmt.Print("Comm:cat:", string(buf[:n]))
+				count += n
+			}
+			if err == io.EOF {
+				break
+			} else if err != nil {
+				log.Fatal(err)
+			}
+		}
+		return count
+	}
+
+	catBuffered := func(filename string) int {
+		f, err := os.Open(filename)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer f.Close()
+		rd := bufio.NewReader(f)
+		wr := bufio.NewWriter(os.Stdout)
+		defer wr.Flush()
+
+		count := 0
+		for {
+			line, err := rd.ReadString('\n')
+			if line != "" {
+				fmt.Print("Comm:catbuf:", line)
+				count++
+			}
+			if err == io.EOF {
+				break
+			} else if err != nil {
+				log.Fatal(err)
+			}
+		}
+		return count
+	}
+
+	if len(os.Args) == 2 {
+		cat(os.Args[1])
+	} else {
+		cat("/etc/hosts")
+	}
+	catBuffered("/etc/resolv.conf")
+
+	runCommand := func(cmdname string, cmdargs ...string) {
+		cmd := exec.Command(cmdname, cmdargs...)
+		out, err := cmd.Output()
+		if out != nil && len(out) != 0 {
+			os.Stdout.Write(out)
+		}
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	runCommand("ls", "-l")
+
+	// Networking can be used by importing the "net" package and using net.Dial:
+	// conn, err := Dial("tcp", "192.0.32.10:80")
+
+	httpGet := func(url string) (string, error) {
+		r, err := http.Get(url)
+		if err != nil {
+			log.Fatal(err)
+		}
+		data, err := ioutil.ReadAll(r.Body)
+		dataStr := string(data)
+		r.Body.Close()
+		if err == nil {
+			fmt.Println(dataStr)
+		}
+		return dataStr, err
+	}
+
+	httpGet("http://www.google.com/robots.txt")
 }
 
 func main() {
 	fmt.Println("Hello world", rand.Intn(100))
+
+	// Getting help:
+	// $ go doc package-name/package-name symbol-name
+	// $ go doc package-name.symbol-name
+	//
+	// List all go packages:
+	// $ go list ...
+	//
+	// Source of built-in packages can be found here: /usr/share/go/src/
 
 	variableDeclarations()
 	functionsInGo()
@@ -519,4 +695,5 @@ func main() {
 	constructorsInGo()
 	concurrencyAndChannels()
 	moreOnChannels()
+	communicationInGo()
 }
