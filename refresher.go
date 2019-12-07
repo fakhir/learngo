@@ -19,6 +19,10 @@ import (
 
 // - Semicolons are optional at end of statements
 // - Any identifier begining with a capital letter gets exported automatically
+// - Sequence of evaluation: first all the imported packages are initialized, then
+//   all variable definitions are evaluated and finally the "func init()" function
+//   within the source file is evaluated. Each source file can have one (or more)
+//   init() function.
 
 func swap(a, b string) (string, string) {
 	return b, a
@@ -77,6 +81,7 @@ func variableDeclarations() {
 
 func functionsInGo() {
 	// Functions cannot be nested but they can be assigned to variables.
+	// Methods cannot be assigned to variables and so cannot be defined within a function.
 	// Functions can be used before they are defined, within the same file.
 
 	// Following are some cases in which functions can be nested and they can form
@@ -112,6 +117,11 @@ func functionsInGo() {
 	// Variadic parameters. Here "nums" is available as a []int slice.
 	var sumOfNums = func(nums ...int) int {
 		total := 0
+		// The blank identifier can be used to ignore a function's returned value.
+		// It can also be used to import packages for side-effects only, i.e. for
+		// invoking the package's init() function only, such as follows:
+		//
+		// import _ "net/http/pprof"
 		for _, num := range nums {
 			total += num
 		}
@@ -287,6 +297,11 @@ func structDataType() {
 
 	// Pointers also use dot notation for struct members (v3.X)
 	fmt.Printf("Struct:Vertex: v3.X=%d, %v, %v\n", v3.X, v1, v2)
+
+	// Annotate struct with field names using %+v
+	// Print a value in Go syntax using %#v
+	// Print a quoted string using %q
+	fmt.Printf("Struct:Vertex:v1 %+v %#v %q\n", v1, v1, "what")
 
 	type Student struct {
 		// These are anonymous field names. Their name is the same as their type.
@@ -533,6 +548,17 @@ func moreOnChannels() {
 	//
 	// - Async functions usually first create a channel which they return to the caller
 	//   and then they run a goroutine which operates on the channel.
+	//
+	// - A channel can be used like a counting  semaphore due to its blocking nature:
+	//   sem <- 1
+	//   critical-section
+	//   <- sem
+	//
+	// - Concurrency (structuring a program as independently executing components) is
+	//   different from parallelism (executing calculations in parallel for efficiency
+	//   on multiple CPUs). Go can handle both but is primarily a concurrent language.
+
+	// Below is an example of Fibonacci using channels
 
 	// dup3 duplicates the given channel into three separate channels.
 	dup3 := func(in <-chan int) (<-chan int, <-chan int, <-chan int) {
@@ -575,6 +601,170 @@ func moreOnChannels() {
 		fmt.Print(num, " ")
 	}
 	fmt.Println()
+
+	// Below is an example of a server/client model for handling concurrent requests.
+
+	maxCPU := runtime.GOMAXPROCS(0)
+
+	type Request struct {
+		args        []int
+		f           func([]int) int
+		resultsChan chan int
+	}
+
+	requestHandler := func(inQueue <-chan *Request) {
+		fmt.Println("***STARTED WORKER")
+		for req := range inQueue {
+			req.resultsChan <- req.f(req.args)
+		}
+		fmt.Println("***STOPPING WORKER")
+	}
+
+	serve := func(inQueue <-chan *Request, quit chan bool) {
+		for i := 0; i < maxCPU; i++ {
+			go requestHandler(inQueue)
+		}
+		fmt.Println("***WAITING QUIT")
+		<-quit
+	}
+
+	sum := func(a []int) (x int) {
+		for _, v := range a {
+			x += v
+		}
+		return
+	}
+
+	queue := make(chan *Request, maxCPU)
+	quit := make(chan bool)
+	go serve(queue, quit)
+
+	for i := 0; i < maxCPU; i++ {
+		req := &Request{[]int{1, 2, 3, 4, 5, 6, 7, 8, 9}, sum, make(chan int)}
+		queue <- req
+		fmt.Println("Channels:concurrent sum:", <-req.resultsChan)
+	}
+
+	quit <- true
+	close(queue)
+	time.Sleep(time.Duration(2) * time.Second)
+}
+
+func typeSwitchAndTypeAssertion() {
+	// - Methods in Go can be defined for any custom type and not just structs.
+	// - An interface is an abstract set of methods expected to be implemented by
+	//   concrete types.
+
+	// Using "type switch" to extract a generic value.
+	type Stringer interface {
+		String() string
+	}
+	var value interface{} = "hello"
+	switch str := value.(type) {
+	case string:
+		fmt.Println("Types:string", str)
+	case Stringer:
+		fmt.Println("Types:stringer", str.String())
+	}
+
+	// Another possibility is to perform a direct conversion using a type assertion
+	str, ok := value.(string)
+	if ok {
+		fmt.Println("Types:Conversion success", str)
+	} else {
+		fmt.Println("Types:Conversion failure")
+	}
+}
+
+type Incrementer interface {
+	Increment() int
+}
+type Decrementer interface {
+	Decrement() int
+}
+
+// Directly embedding one interface into another causes all the child's methods to
+// be inherited by the parent. See also struct-embedding below.
+type IncrementerDecrementer interface {
+	Incrementer
+	Decrementer
+}
+type Counter int
+type CompatibleCounter int
+
+// Implement Incrementer and Decrementer interfaces for *Counter
+func (ctr *Counter) Increment() int {
+	*ctr++
+	return int(*ctr)
+}
+func (ctr *Counter) Decrement() int {
+	*ctr--
+	return int(*ctr)
+}
+
+func methodsAndInterfaces() {
+	// The Counter type implicitly satisfies the Incrementer interface.
+	var ctrCounter Counter
+	ctrCounter.Increment()
+
+	// A *Counter type can be assigned directly to a variable of Incrementer type.
+	// The compiler also verifies that Counter implements this interface.
+	var ctrCounterPtr *Counter = new(Counter)
+	var ctrIncrementer Incrementer = ctrCounterPtr
+	ctrIncrementer.Increment()
+
+	fmt.Println("Interfaces:ctrCounter", ctrCounter)
+	fmt.Println("Interfaces:ctrCounterPtr", *ctrCounterPtr)
+	fmt.Println("Interfaces:ctrIncrementer", ctrIncrementer)
+
+	// Most interface conversions in Golang are explicit and are thus checked at
+	// compile time. But sometimes the check is implicit. For example, the
+	// encoding/json package takes a value which can optionally implement a
+	// Marshaler interface. The package happily accepts values even if they don't
+	// implement the interface. In such cases if the user intends to write a type
+	// which explicitly implements an interface, then he can explicitly request
+	// compiler type checking using the following construct involving the blank
+	// identifier.
+	//
+	// var _ json.Marshaler = (*RawMessage)(nil)
+	//
+	// This is basically converting a nil pointer to a RawMessage type pointer and
+	// assigning it to a Marshaler interface variable, thus explicitly invoking
+	// type checking.
+
+	// Methods are functions associated with specific types or interfaces.
+	// An interface is the defintion of a set of methods. An interface only defines
+	// methods and does not define data/variables.
+
+	// When defining methods of a type, the type is usually a pointer if it is a
+	// concrete type such as an int, string, struct, etc. But if it is a type which
+	// implicitly holds a reference to another object and which causes a pass by
+	// reference behavior instead of a pass by value, then the type is used instead
+	// of a pointer, for example, types such as slices, maps and channels are used
+	// directly when specified as a receiver (the type associated with a method).
+
+	// Methods can only be defined for locally defined types and not for built-in
+	// types.
+
+	// A struct-embedding example
+	func() {
+		type Job struct {
+			Command string
+			// When embedding one struct into another then if the name is skipped then
+			// the parent struct automatically inherits all methods of the child
+			// struct. This has an implicit field name of "Logger" which must be
+			// initialized with a valid value when a variable of this type is created.
+			// This way no intermeidate forwarding methods need to be defined.
+			*log.Logger
+		}
+
+		newJob := func(command string, logger *log.Logger) *Job {
+			return &Job{command, logger}
+		}
+		job := newJob("dir", log.New(os.Stdout, "Interfaces:Job:", log.Ldate))
+		// The Println method is inherited from log.Logger.
+		job.Println("Job created")
+	}()
 }
 
 func communicationInGo() {
@@ -695,5 +885,7 @@ func main() {
 	constructorsInGo()
 	concurrencyAndChannels()
 	moreOnChannels()
+	typeSwitchAndTypeAssertion()
+	methodsAndInterfaces()
 	communicationInGo()
 }
