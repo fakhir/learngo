@@ -754,8 +754,14 @@ func methodsAndInterfaces() {
 			// the parent struct automatically inherits all methods of the child
 			// struct. This has an implicit field name of "Logger" which must be
 			// initialized with a valid value when a variable of this type is created.
-			// This way no intermeidate forwarding methods need to be defined.
+			// This way no intermediate forwarding methods need to be defined.
 			*log.Logger
+
+			// Also note that embedding an interface within a structure does not
+			// have the same effect and does not cause the interface to be implicitly
+			// inherited. Such an interface will require explicit forwarding, as is
+			// done commonly for the "error" interface being embedded within structs
+			// such as "go doc os.PathError".
 		}
 
 		newJob := func(command string, logger *log.Logger) *Job {
@@ -765,6 +771,43 @@ func methodsAndInterfaces() {
 		// The Println method is inherited from log.Logger.
 		job.Println("Job created")
 	}()
+}
+
+func errorHandling() {
+	// See "go doc builtin.error" for definition of the error interface.
+	//
+	// This example implements a design pattern for handling errors within a package.
+	// This uses panic() within a package to return an error to the caller but the
+	// panic() is recover()'ed within the package so it does not cause a panic within
+	// the package user's code, which is the recommended practice. Library packages
+	// should return meaning errors instead of causing a panic.
+
+	// // Error is the type of a parse error; it satisfies the error interface.
+	// // Another way to define this is to embed an "err Error" within a struct
+	// // and then implement a forwarding Error method which calls err.Error().
+	// type Error string
+	// func (e Error) Error() string {
+	// 	return string(e)
+	// }
+
+	// // error is a method of *Regexp that reports parsing errors by
+	// // panicking with an Error.
+	// func (regexp *Regexp) error(err string) {
+	// 	panic(Error(err))
+	// }
+
+	// // Compile returns a parsed representation of the regular expression.
+	// func Compile(str string) (regexp *Regexp, err error) {
+	// 	regexp = new(Regexp)
+	// 	// doParse will panic if there is a parse error.
+	// 	defer func() {
+	// 		if e := recover(); e != nil {
+	// 			regexp = nil    // Clear return value.
+	// 			err = e.(Error) // Will re-panic if not a parse error.
+	// 		}
+	// 	}()
+	// 	return regexp.doParse(str), nil
+	// }
 }
 
 func communicationInGo() {
@@ -887,5 +930,8 @@ func main() {
 	moreOnChannels()
 	typeSwitchAndTypeAssertion()
 	methodsAndInterfaces()
+	errorHandling()
 	communicationInGo()
+
+	setupWebserv()
 }
